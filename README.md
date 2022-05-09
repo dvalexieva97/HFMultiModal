@@ -1,174 +1,141 @@
 # 🤗Hugging Face ML researcher/engineer code exercise - Funky multi-modal version
+## Dianka Alexieva
 
-## Philosophy of the exercise and disclaimer
+*Below is a summary of the process, notes, potential for improvements for the Hugging Face ML researcher coding 
+exercise.*
 
-This is a rather **open** code exercise, closer to a small research project than your usual code exercise.
-There is no gold answer and hopefully no ready-to-copy answers on the web as well. Try to spend ~ 3 hours on it.
+This repo contains the following folders and files:
+- ./data - folder with generated dataset:
+  1. *dataset_dic.pkl* - a pickle with our generated text dataset per ImangeNet class
+  2. *input_texts.txt* - a .txt file with all input texts
+  3. *labels_tensor.bin* - a torch tensor with ImageNet labels for our dataset
+  4. *tokens_tensor.bin* - a torch tensor with our tokenized model input sequences
+- *BERT_sentence2ImageNet.ipynb* - notebook with fine-tuning of BERT sequence classification
+- ./model - folder with fine-tuned sequence classification model
+- *prepare_data.py* - script to generate data
+- *run_model* - utilities to generate an image from text
+- *demo.py* - a demo script generating images from a list of sentences
+- *sample_images* - folder with savede sample images from sample sentences
 
-The focus of the project is mostly to build a quick proof-of-concept for an idea. As such the usual steps of evaluation and metric computation can be skipped in this project even though you would like to have them in a typical, longer than 3 hours, project.
-
-The submitted result for this code exercise can range from:
-
-- a notebook with pieces of code and some comments,
-- a list of the problems you met while doing the exercise and how you tackle some of them.
-- a full code base with a running demo and finished examples.
-
-What we want to see is whether:
-
-- you have a good and hands-on knowledge of python,
-- you have a good and hands-on understanding of at least one deep learning framework between PyTorch and TensorFlow,
-- you have a good and hands-on knowledge of how neural network models are trained and used, 
-- your code and approach can be understood by third parties, and
-- you have some interest in funky projects and are autonomous enough to navigate in an open-field of close-to-research projects.
-
-We're especially interested in understanding how you approach projects, so it is important that you can explain the work you do, the successes as well as the failures. We want to understand what you have tried and you will be evaluated on the discussion and comments just as much as the technical exercise.
-
-## Introduction
-
-Natural language understanding models have been trending recently. In parallel, there is exciting work on image generation, traditionally using GANs or likelihood-based methods. Combining text and image is usually done by using a classifier model trained on parallel images and text inputs for join multi-modal reasoning. Typical recent examples are the [following](http://arxiv.org/abs/1908.06938) [works](http://arxiv.org/abs/1909.02950) (not necessary to read them for the present exercise).
-
-In this exercise, we'll take a different approach. We want to see if a good language understanding model (like Bert) can be combined with a good image generation model (like BigGAN) to **generate good quality images from text** end-to-end in a creative proof-of-concept application.
-
-Here is the target workflow:
-
-- the user input some text, e.g. "I have a cat",
-- a pretrained language model (e.g. DistilBERT) converts the text in contextualized hidden-states embeddings
-- a mapping model (that you will build in the exercise) converts the contextualized hidden-states embeddings in a input vector for a pretrained image generation model (BigGAN)
-- the pretrained image generation model converts the input vector in an image, hopefully the image of a cat.
-
-Here is an illustration of what we are trying to build:
-
-![workflow](./assets/multi-modal-code-exercise.png)
-
-References for BERT and BigGAN, if you haven't read these papers:
-
-- The [BERT paper](http://arxiv.org/abs/1810.04805)
-- The [BigGan paper](https://openreview.net/forum?id=B1xsqj09Fm)
-
-The time to read these papers is not comprised in the timing of the current coding exercise. BERT paper is an essential paper in today's NLP, so read it anyway. Reading the BigGAN paper is optional, we reproduce the main necessary elements below (but it's an interesting paper nonetheless).
-
-Training a good text understanding and a good image generation model is very expensive so we want to start from pretrained models: a pretrained language model (like Bert or GPT-2) and a pretrained image generation model like BigGAN.
-
-Moreover, the discriminator of BigGAN was not released so we can't really train or fine-tune this model. We will assume BigGAN is a static model in the following and don't expect you to train or fine-tune it.
-
-## Some words on BigGAN
-
-A generative adversarial model (GAN), like BigGAN, is usually trained on ImageNet generate an image from a set of inputs consisting of:
-
-- a noise vector (of length 128 for BigGAN), typically randomly initialized for each sample from a truncated normal distribution, and
-- a one-hot class vector (of length 1000) indicating which of the 1000 classes of ImageNet the image should be generated for.
-
-The first step of BigGAN's forward pass is to convert the one-hot 1000-dim class vector in a dense class vector (of length 128) representing the associated ImageNet class using an embedding projection matrix similar to a typical word embedding matrix.
-
-The noise vector and the dense class embedding are then concatenated in a single input vector of length 256 which is used for the image generation process.
-
-We reproduce the forward pass of BigGAN from [here](https://github.com/huggingface/pytorch-pretrained-BigGAN/blob/master/pytorch_pretrained_biggan/model.py#L289) to illustrated this:
-
-```python
-def forward(self, noise, class_one_hot_label, truncation):
-    """ inputs:
-            - noise: vector of shape (batch size, 128)
-            - class_one_hot_label: vector of shape (batch size, 1000)
-            - truncation: a float as hyper-parameter (not important for us, for details see BigGAN paper)
-        Outputs:
-            - output_image: an image of shape (batch size, 3, XXX, XXX)
-                where XXX is the resolution of the BigGAN checkpoint used (128, 256 or 512)
-    """
-    class_embed = self.embeddings(class_one_hot_label)  # shape (batch size, 128)
-    input_vector = torch.cat((noise, class_embed), dim=1)  # shape (batch size, 256)
-
-    output_image = self.generator(input_vector, truncation)
-    return output_image
-```
-
-## Some words on aligning latent spaces
-
-As we can see we basically have two latent spaces that were trained separately:
-
-- BERT embeddings which are in a 768-dimensions latent space and are associated to text tokens
-- BigGAN embeddings which are in a 128-dimensions latent space and are associated to each ImageNet class (the noise vectors don't really have usable information content).
-
-We would like to build a mapping between these two embedding spaces to connect the two models in a relevant way so that a text input like "I have a cat" would generate the image of a cat.
-
-Learning a mapping between two independently learned latent spaces has been investigated in fields like unsupervised machine translation. A logical solution, first proposed by [Mikilov et al. in 2013](https://arxiv.org/abs/1309.4168), involves learning a mapping between both embedding spaces learned from a set of seed points mapping one space to the other.
-
-We'll use the ImageNet classes as a database to generate seed mapping points between our two models. In our case we can see that:
-
-- on the one hand, each ImageNet class can be associated to one (or several) text label(s) like "cat", "dog", "car" and so on,
-- on the other hand, our pretrained language model can generate hidden-states from provided sentences containing these words, for instance "I have a cat", "My dog is barking" or "This car was driving fast".
-
-From these two associated sets of text inputs we can thus:
-
-- manually create a dictionary of text sentences associated to each ImageNet class,
-- extract embeddings associated to both, by computing BERT's output as inputs `Xi` for our mapping function and extracting the relevant ImageNet dense class vector `Zi` from BigGAN's input embedding matrix as target.
-- use this seed dictionary of associated `Xi` and `Zi` to learn a mapping function from the language model hidden-states to relevant input vectors for BigGAN.
-
-Obviously, the generalization of such a procedure on random text outside of the fine-tuning distribution of seed sentence, or outside of the ImageNet training classes, will not be guaranteed and the multi-modal systems will probably generate more unpredictable images.
-
-## Code exercise
-
-The coding exercise can be done in either `PyTorch` or `TensorFlow 2.0` (maybe also possible in TF 1.0, but you'll have to find the right tools and repositories) and should be done in `python`.
-
-You should use as starting points:
-
-- a PyTorch or TF 2.0 version of a pretrained language model, for instance, as provided in the [Transformers library](https://github.com/huggingface/transformers), and
-- a PyTorch (TF 2.0 version is being finalized) of a pretrained BigGan model, for instance as provided in the [pretrained-biggan library](https://github.com/huggingface/pytorch-pretrained-BigGAN). You can also use the TF 1.0 version provided on tf.hub and extract the relevant variables (embeddings of the GAN).
-
-The provided utility scripts in this repo are framework agnostic, except for the `generate_image` function which uses the PyTorch implementation of BigGAN. They are very simple and mostly provided for demo/data generation (see below).
-
-Once you've briefly seen how these repositories are organized, the first step is to build a dataset of input-output for learning the mapping between the language model output hidden-states and the ImageNet classes embeddings of the GAN.
 
 ### Building a dataset of text sequence associated to ImageNet classes
 
-We provide a simple script ([prepare_data.py](./prepare_data.py)) that will generate a list of sentences for a set of ImageNet classes using a very simple heuristic with patterns. For instance an ImageNet class with a image of a dig will be associated with a sentence 'I saw a dig'.
+### Workflow:
+To generate a dataset of sentences associated to ImageNet classes (for the 598 simple classes filtered from the original 
+1K), I used multiple text generation methods for each ImageNet class:
 
-See this file for more details on the filtering and heuristics involved.
+1. Multiple sentence generation models used:
+- WordNet example sentences fetched for each ImageNet class (when available)
+- GPT-2 sentence generation from individual classes using beam search decoding to get most likely output sequences
+- Sentence generation using k2t (key2text model) (also with beam search)
+- Simple sentence pattern (in case no relevant sentences were generated by the above models)
+2. The generated sentences were filtered for Part of Speech, as some original generated sentences changed the POS 
+   (e.g. bear --> bearing) 
+The generated sequences were tokenized into sentences and were filtered to return only sentences containing the 
+   target word.
+    
+**Execution time for 598 simple classes:** ~2 hours
 
-You can use (and modify as needed) this script to generate a first dataset.
+**Dataset size:** 3940 sentences
 
-**Code exercise output**:
+### Improvements:
+Originally I wanted to create a multi-label multiclass model. 
+For this, I wanted to generate sentences using combinations of multiple ImageNet classes. 
+However, a binomial combination of our 598 classes would yield ~500K combinations, which wasn't feasible for this 
+exercise.
+As an solution to this, I would like to use a word similarity filter (e.g. simple cosine, or using BERT) to define 
+the most relevant seed word combinations and generate sentences with those combinations.
 
-- List some improvements you would propose to improve this data generation process.
+Furthermore, using the current sentence generation methods, playing around with the max sequence length, as well as the 
+beam parameters could yield even more relevant sentences.
+
+Finally, I used nltk's WordNet implementation for POS tagging, however I noticed that it does not always work perfectly.
+A fine-tuned transformer for POS tagging could be used to improve sentence filtering.
 
 ### Building a dataset for training a mapping function
 
-From the previous text dataset you can now generate a dataset that can be used to train a mapping function from a language model output to an input vector for BigGAN.
+### Workflow:
+I generated the training dataset using the default function in prepare_data.py
+As proposed in the task, I 
+- Generated input vectors from the outputs of a pretrained language model BERT for our examples - 
+  as the input sentences were different lengths, I added paddinng to up to 30 tokens 
+  (assuming model inputs are short sentences)
+- Generated target vectors. Here instead of extracting associated target class embeddings from BigGAN's input embedding 
+  matrix, I saved the class ids as a torch tensor
 
-For instance you can follow the following path:
+Since the generated sequences were of different lengths, I added padding to the input vectors.
 
-- Generate input vectors from outputs from a pretrained language model for all the examples,
-- Generate target vectors by extracting associated target class embeddings from BigGAN's input embedding matrix (see the above `forward` pass code).
+**folder where dataset is saved:** './data'
 
-**Code exercise output**:
+### Improvements:
 
-- Create the dataset for training the mapping function
-- List some improvements or alternative that could be explored to improve this step.
+1. As an improvement, I would also generate an attention_mask vector for each input vector to improve model training.
+2. As mentioned previously, would generate a multi-label dataset and train the model on it, in order to 
+3. I would also generated longer text sequences, so that we can generate meaningful results from larger pieces of input 
+   text. 
+4. As can be seen in demo.py, abstract sentences or sentences which do not contain any ImageNet classes generate 
+   unpredictable output. To the sequence generation training I would add sentences which do not contain any of our ImageNEt classes and would 
+   yield empty images for such input.
+5. Similarly to p.4, I would generate non-class sentences (e.g. "I do not see a cat") to generate empty images for such 
+   cases.
+5. Finally, I would work on speeding up the data generation process, as it is definitely too long at the moment.
 
 ### Learning a mapping function
 
-Now you can train a mapping function from the output of the language model to the input of the generative adversarial network.
+### Workflow
 
-You can try various mapping function, from simple linear projection to more complex functions.
+For the mapping function, I did the following:
 
-In general, the expected interface of the mapping function is:
+Rather than training BERT's embedding space to BigGAN's, I fine-tuned BERT for sequence classification using our 
+dataset.
+I then mapped back the output of the fine-tuned sequence classification model to ImageNet's class and 
+generated ImageNet's (,128) embedding from the class.
 
-- input: a vector of shape (sequence length, language model hidden-size), for ex (sequence length, 768) for a DistilBERT language model.
-- output: a vector of shape (GAN model hidden-size,), i.e. (128,) for BigGAN.
+For this, I tweaked the text_to_image() function in run_model.py
+The mapping_model() function I created works as follows:
+1. It takes a text sequence as input and tokenizes it 
+2. The tokenized input is run through the fine-tuned sequence classification model
+3. The most likely predicted output of the classification model is converted to an ImageNet class (id) 
+4. From the class id I generated a one_hot_label vector and then a BigGAN ImageNet embedding: mapping_output.
 
-**Code exercise output**:
+    The function returns the mapping_output, as well as the token vector, needed to generate the noise_seed_vector for the 
+   final image.
 
-- Train your mapping model
-- List some improvements or alternative that could be explored to improve this step.
+**Sequence classification Model Parameters:**
+
+- batch_size = 32
+- epochs = 30
+- optimizer = AdamW
+
+
+### Improvements:
+As an improvement, I would train a multi-label multiclass model based on combinations of ImageNet classes 
+  ("The cat and dog are playing." --> ["cat", "dog"]). 
+   
+The output of the multi-label multiclass model I would map to ImageNet's classes and then to generate an image using 
+interpolations (something similar to this 
+[excellent notebook](https://colab.research.google.com/drive/1MhfEAOBwhGu1A-F2NSVxGQrkJ4vk7w4V#scrollTo=dSAyfDfnVugs&forceEdit=true&offline=true&sandboxMode=true))
+
+### Note: 
+I realize I did not solve the task exactly as requested. My reasoning behind this was that at the end of the day our 
+input for GAN was a ImageNet class (or for multi-label: a set of classes). Thus, as we do not have additional GAN 
+inputs apart from the ImageNet classes (e.g. embeddings about the movement of an image:
+"a cat sitting" vs. "a cat jumping" ). To me this meant we can simplify the task to a sequence classification task with 
+direct linear mapping between the sequence classification output layer and BigGAN's embedding. 
+
+### Alternatives
+
+I do however see the value of latent space mapping and did some research on it. 
+
+1. The mapping model could be a variational autoencoder translating BERT's hidden states to BigGAN's input 
+   ([Theodoridis et al., 2020](https://openaccess.thecvf.com/content_CVPRW_2020/papers/w56/Theodoridis_Cross-Modal_Variational_Alignment_of_Latent_Spaces_CVPRW_2020_paper.pdf)). 
+2. Another solution to latent space mapping has been described by 
+   [Skorokhodov et al., 2021](https://arxiv.org/abs/2104.06954). The authors propose a GAN-based generator in an 
+   adversarial setting. 
+
 
 ### Demo
 
-The end goal of the exercise is to use the model at inference time, for instance by generating an image of a cat when inputting a sentence like "I love my cat".
+demo.py can be found generating images from a list of sample sentences (not included in the original dataset)
 
-We provide in the [`run_model.py`](./run_model.py) script a few utilities you can use to generate picture from text if your mapping function follow the expected interface mentioned above.
 
-Overall, please bear in mind that:
-
-- we don't require you to finish the exercise, sending back work-in-progress is expected, and
-- the model might not work entirely as intended in the end. This is also fine since the project itself is closer to a research project than a regular code-exercise.
-
-Good luck! 🤗🤗🤗
