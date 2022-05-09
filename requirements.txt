@@ -1,0 +1,11 @@
+pytorch-pretrained-biggan
+transformers
+matplotlib
+nltk
+Pillow
+tqdm
+jupyter
+scipy
+tensorflow
+keytotext
+cStringIO
