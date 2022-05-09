@@ -70,15 +70,16 @@ Since the generated sequences were of different lengths, I added padding to the 
 ### Improvements:
 
 1. As an improvement, I would also generate an attention_mask vector for each input vector to improve model training.
-2. As mentioned previously, would generate a multi-label dataset and train the model on it, in order to 
-3. I would also generated longer text sequences, so that we can generate meaningful results from larger pieces of input 
-   text. 
-4. As can be seen in demo.py, abstract sentences or sentences which do not contain any ImageNet classes generate 
-   unpredictable output. To the sequence generation training I would add sentences which do not contain any of our ImageNEt classes and would 
-   yield empty images for such input.
-5. Similarly to p.4, I would generate non-class sentences (e.g. "I do not see a cat") to generate empty images for such 
+2. As mentioned previously, would generate a multi-label dataset and train the model on it, in order to generate cross-
+   class images
+3. I would also generate longer text sequences, so that we can get meaningful results from larger pieces of input text. 
+4. As can be seen in *demo.py*, abstract sentences or sentences which do not contain any ImageNet classes generate 
+   unpredictable output. To the sequence generation training I would add sentences which do not contain any of our 
+   ImageNet classes and would map those to empty image.
+5. Similarly to p.4, I would generate non-class sentences (e.g. "I do not see a cat") to generate yield images for such 
    cases.
-5. Finally, I would work on speeding up the data generation process, as it is definitely too long at the moment.
+5. Finally, I would work on speeding up the data generation process, as it is definitely too long at the moment (run on
+   GPU etc.).
 
 ### Learning a mapping function
 
@@ -93,13 +94,13 @@ generated ImageNet's (,128) embedding from the class.
 
 For this, I tweaked the text_to_image() function in run_model.py
 The mapping_model() function I created works as follows:
-1. It takes a text sequence as input and tokenizes it 
-2. The tokenized input is run through the fine-tuned sequence classification model
-3. The most likely predicted output of the classification model is converted to an ImageNet class (id) 
+1. It takes a text sequence as input and tokenizes it.
+2. The tokenized input is run through the fine-tuned sequence classification model.
+3. The most likely predicted output of the classification model is converted to an ImageNet class (id) .
 4. From the class id I generated a one_hot_label vector and then a BigGAN ImageNet embedding: mapping_output.
 
-    The function returns the mapping_output, as well as the token vector, needed to generate the noise_seed_vector for the 
-   final image.
+    The function returns the mapping_output, as well as the token vector, needed to generate the noise_seed_vector for 
+   the final image.
 
 **Sequence classification Model Parameters:**
 
@@ -112,20 +113,20 @@ The mapping_model() function I created works as follows:
 As an improvement, I would train a multi-label multiclass model based on combinations of ImageNet classes 
   ("The cat and dog are playing." --> ["cat", "dog"]). 
    
-The output of the multi-label multiclass model I would map to ImageNet's classes and then to generate an image using 
+The output of the multi-label multiclass model I would map to ImageNet's classes and then generate an image using 
 interpolations (something similar to this 
 [excellent notebook](https://colab.research.google.com/drive/1MhfEAOBwhGu1A-F2NSVxGQrkJ4vk7w4V#scrollTo=dSAyfDfnVugs&forceEdit=true&offline=true&sandboxMode=true))
 
 ### Note: 
 I realize I did not solve the task exactly as requested. My reasoning behind this was that at the end of the day our 
-input for GAN was a ImageNet class (or for multi-label: a set of classes). Thus, as we do not have additional GAN 
+input for GAN is an ImageNet class (or for multi-label: a set of classes). Thus, as we do not have additional GAN 
 inputs apart from the ImageNet classes (e.g. embeddings about the movement of an image:
 "a cat sitting" vs. "a cat jumping" ). To me this meant we can simplify the task to a sequence classification task with 
 direct linear mapping between the sequence classification output layer and BigGAN's embedding. 
 
 ### Alternatives
 
-I do however see the value of latent space mapping and did some research on it. 
+Nevertheless, I see the value of latent space mapping and did some research on it. 
 
 1. The mapping model could be a variational autoencoder translating BERT's hidden states to BigGAN's input 
    ([Theodoridis et al., 2020](https://openaccess.thecvf.com/content_CVPRW_2020/papers/w56/Theodoridis_Cross-Modal_Variational_Alignment_of_Latent_Spaces_CVPRW_2020_paper.pdf)). 

@@ -39,7 +39,7 @@ else:
 vocab_size = 1000
 MODELPATH = "./model/pytorch_model.bin"
 CONFIGPATH = "./model/config.json"
-MAX_LEN = 30  # todo
+MAX_LEN = 30
 MODELFOLDER = "./model/"
 
 
@@ -162,7 +162,7 @@ def mapping_model(text, gan_model, model, tokenizer, max_len=MAX_LEN, pretrained
 def text_to_image(text, mapping_model=mapping_model,
                   lm_model=None, lm_tokenizer=None, gan_model=None, pretrained_gan_model_name='biggan-deep-128',
                   truncation=0.4, verbose=0,
-                  noise_seed=None): # todo define max token len
+                  noise_seed=None):
     """ Utility function to generate an image from text using a mapping model"""
 
     if lm_tokenizer is None or lm_model is None:

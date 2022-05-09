@@ -235,10 +235,6 @@ def tokenize_dataset(dataset, lm_tokenizer=None, pretrained_lm_model_name='disti
     tokens_list = []
     texts_list = []
 
-    # import pickle # todo del
-    # with open("./data/dataset_dic.pkl", "rb") as h:
-    #     dataset = pickle.load(h)
-
     for class_index, examples in tqdm(dataset.items()):
         examples_tokens = lm_tokenizer(examples, padding="max_length", max_length=max_len, truncation=True)["input_ids"]
         tokens_list.extend(examples_tokens)
